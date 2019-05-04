@@ -24,7 +24,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @ShellComponent
-public class BenchmarkCommand {
+public class SimulationCommand {
 
     private final static Map<String, RadiusUser> usercache = new HashMap<String,RadiusUser>();
 
@@ -66,7 +66,7 @@ public class BenchmarkCommand {
         request.addAttribute("NAS-Port-Id", nasportid);
         RadiusPacket dmrep = cli.communicate(request,radiusConfig.getAuthport());
         if(dmrep.getPacketType()==RadiusPacket.ACCESS_REJECT){
-            System.out.println(dmrep.toLineString());
+//            System.out.println(dmrep.toLineString());
             return null;
         }
         RadiusAttribute ipattr = dmrep.getAttribute("Framed-IP-Address");
@@ -154,7 +154,6 @@ public class BenchmarkCommand {
         } catch (IOException e) {
             return String.format("reload userfile error %s", e.getMessage());
         }
-        AtomicInteger casttotal = new AtomicInteger();
         AtomicInteger authDrop = new AtomicInteger();
         AtomicInteger authReq = new AtomicInteger();
         AtomicInteger authAccept = new AtomicInteger();
@@ -164,7 +163,6 @@ public class BenchmarkCommand {
         AtomicInteger acctStop = new AtomicInteger();
         AtomicInteger acctResp = new AtomicInteger();
         AtomicInteger acctDrop = new AtomicInteger();
-        AtomicInteger sleep = new AtomicInteger();
         List<Future> result = new ArrayList<>();
         ThreadPoolTaskExecutor executor = radiusConfig.getExecutor(total,pool);
         for(int i=0;i<total;i++){
@@ -180,9 +178,7 @@ public class BenchmarkCommand {
                         return;
                     }
                     authAccept.getAndIncrement();
-                    casttotal.getAndAdd((int) (System.currentTimeMillis()-start));
                 } catch (Exception e) {
-//                    System.out.println(String.format("send auth failure %s", e.getMessage()));
                     authDrop.getAndIncrement();
                     return;
                 }
@@ -192,10 +188,7 @@ public class BenchmarkCommand {
                     session = sendAcct(session,AccountingRequest.ACCT_STATUS_TYPE_START);
                     acctStart.getAndIncrement();
                     acctResp.getAndIncrement();
-                    casttotal.getAndAdd((int) (System.currentTimeMillis()-start));
-//                    System.out.println(String.format("%s-%s online!", session.getUsername(),session.getAcctSessionId()));
                 } catch (Exception e) {
-//                    System.out.println(String.format("send accounting start failure %s", e.getMessage()));
                     acctDrop.getAndIncrement();
                     return;
                 }
@@ -206,15 +199,11 @@ public class BenchmarkCommand {
                 }
 
                 try {
-                    long start = System.currentTimeMillis();
                     session = sendAcct(session,AccountingRequest.ACCT_STATUS_TYPE_INTERIM_UPDATE);
                     acctUpdate.getAndIncrement();
                     acctResp.getAndIncrement();
-                    casttotal.getAndAdd((int) (System.currentTimeMillis()-start));
-//                    System.out.println(String.format("%s-%s online update!", session.getUsername(),session.getAcctSessionId()));
                 } catch (Exception e) {
                     acctDrop.getAndIncrement();
-//                    System.out.println(String.format("send accounting update failure %s", e.getMessage()));
                 }
 
                 try {
@@ -223,15 +212,11 @@ public class BenchmarkCommand {
                 }
 
                 try {
-                    long start = System.currentTimeMillis();
                     session = sendAcct(session,AccountingRequest.ACCT_STATUS_TYPE_STOP);
                     acctStop.getAndIncrement();
                     acctResp.getAndIncrement();
-                    casttotal.getAndAdd((int) (System.currentTimeMillis()-start));
-//                    System.out.println(String.format("%s-%s offline!", session.getUsername(),session.getAcctSessionId()));
                 } catch (Exception e) {
                     acctDrop.getAndIncrement();
-//                    System.out.println(String.format("send accounting stop failure %s", e.getMessage()));
                 }
             });
             result.add(ft);
@@ -245,7 +230,6 @@ public class BenchmarkCommand {
             long done = result.stream().filter(Future::isDone).count();
             System.out.println(String.format("done task = %s", done));
 
-            int cast = casttotal.intValue();
 
             StringBuffer buff = new StringBuffer();
             buff.append("\r\n####################################################\r\n");
@@ -260,9 +244,6 @@ public class BenchmarkCommand {
             buff.append("#  AccountingRequest: ").append(acctStart.intValue()+acctUpdate.intValue()+acctStop.intValue()).append("\r\n");
             buff.append("#  AccountingResponse: ").append(acctResp.intValue()).append("\r\n");
             buff.append("#  AccountingDrop: ").append(acctDrop.intValue()).append("\r\n");
-//            buff.append("#  Current Cast: ").append(cast).append(" ms").append("\r\n");
-//            double qps = (acctStart.intValue()+acctUpdate.intValue()+acctStop.intValue()+authReq.intValue()) /cast*1.00;
-//            buff.append("#  Current QPS: ").append(qps).append("\r\n");
             buff.append("#####################################################\r\n");
             System.out.println(buff.toString());
             if(done == result.size()){
