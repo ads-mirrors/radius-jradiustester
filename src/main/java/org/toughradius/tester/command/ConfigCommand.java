@@ -3,6 +3,8 @@ package org.toughradius.tester.command;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.shell.standard.ShellComponent;
 import org.springframework.shell.standard.ShellMethod;
+import org.toughradius.tester.common.FileUtil;
+import org.toughradius.tester.common.StringUtil;
 import org.toughradius.tester.config.RadiusConfig;
 
 @ShellComponent
@@ -48,6 +50,17 @@ public class ConfigCommand {
     public String setupUserfile(String userfile) {
         radiusConfig.setUserfile(userfile);
         return "setup done";
+    }
+
+
+    @ShellMethod("gen test users")
+    public String genUsers(String prefix,String passwd,int num) {
+        StringBuffer buff = new StringBuffer();
+        for(int i = 0;i<num;i++){
+            buff.append(prefix).append(String.format("%04d",i)).append(",").append(passwd).append("\r\n");
+        }
+        FileUtil.writeFile(radiusConfig.getUserfile(),buff.toString());
+        return "done";
     }
 
 

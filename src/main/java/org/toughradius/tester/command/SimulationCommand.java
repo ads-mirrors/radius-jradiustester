@@ -11,16 +11,18 @@ import org.tinyradius.packet.RadiusPacket;
 import org.tinyradius.util.RadiusClient;
 import org.tinyradius.util.RadiusException;
 import org.tinyradius.util.RadiusUtil;
-import org.toughradius.tester.common.CoderUtil;
-import org.toughradius.tester.common.DateTimeUtil;
-import org.toughradius.tester.common.FileUtil;
+import org.toughradius.tester.common.*;
 import org.toughradius.tester.config.RadiusConfig;
 import org.toughradius.tester.entity.RadiusSession;
 import org.toughradius.tester.entity.RadiusUser;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @ShellComponent
@@ -30,24 +32,41 @@ public class SimulationCommand {
 
     private final static Random random = new Random();
 
+    private final static SpinLock lock = new SpinLock();
+
     @Autowired
     private RadiusConfig radiusConfig;
 
     private void  reloadUser() throws IOException {
         usercache.clear();
+        File ufile = new File(radiusConfig.getUserfile());
+        if(!ufile.exists()){
+            FileUtil.writeFile(radiusConfig.getUserfile(),"test01,888888\r\n");
+        }
         String userstr = FileUtil.getFileContent(radiusConfig.getUserfile());
-        String[] userlines = userstr.split("\r\n");
+        String[] userlines = userstr.split("\n");
         Arrays.stream(userlines).forEach(u->{
             String[] attrs = u.split(",");
-            usercache.put(attrs[0],new RadiusUser(attrs[0],attrs[1]));
+            usercache.put(attrs[0],new RadiusUser(attrs[0].trim(),attrs[1].trim()));
         });
     }
 
-    private RadiusUser getandUser(){
-        return usercache.values().stream().findAny().get();
+    private RadiusUser getRandUser(){
+        try{
+            lock.lock();
+            RadiusUser[] users = usercache.values().toArray(new RadiusUser[]{});
+            try{
+                Arrays.sort(users);
+            }catch(Exception ignore){
+            }
+            RadiusUser user = users[0];
+            user.setHits(user.getHits()+1);
+            return user;
+        }finally {
+            lock.unLock();
+        }
+
     }
-
-
 
     public RadiusSession sendAuth(RadiusUser user) throws Exception {
         RadiusClient cli = radiusConfig.getClient();
@@ -147,76 +166,70 @@ public class SimulationCommand {
 
 
     @ShellMethod("run Simulation test")
-    public String  simtest(int total,int pool){
+    public String  simtest(int total,int pool, int uptime, int ttl){
         System.out.println("\r\nstart Simulation test...");
+        final RadiusStat stat = new RadiusStat();
         try {
             reloadUser();
         } catch (IOException e) {
             return String.format("reload userfile error %s", e.getMessage());
         }
-        AtomicInteger authDrop = new AtomicInteger();
-        AtomicInteger authReq = new AtomicInteger();
-        AtomicInteger authAccept = new AtomicInteger();
-        AtomicInteger authRejectt = new AtomicInteger();
-        AtomicInteger acctStart = new AtomicInteger();
-        AtomicInteger acctUpdate = new AtomicInteger();
-        AtomicInteger acctStop = new AtomicInteger();
-        AtomicInteger acctResp = new AtomicInteger();
-        AtomicInteger acctDrop = new AtomicInteger();
         List<Future> result = new ArrayList<>();
+        ScheduledExecutorService sched = Executors.newSingleThreadScheduledExecutor();
+        sched.scheduleWithFixedDelay(stat::runStat,5,5, TimeUnit.SECONDS);
         ThreadPoolTaskExecutor executor = radiusConfig.getExecutor(total,pool);
         for(int i=0;i<total;i++){
             Future ft = executor.submit(()->{
-                RadiusUser user = getandUser();
+                RadiusUser user = getRandUser();
                 RadiusSession session = null;
                 try {
                     long start = System.currentTimeMillis();
                     session = sendAuth(user);
-                    authReq.getAndIncrement();
+                    stat.incrAuthReq();
                     if(session==null){
-                        authRejectt.getAndIncrement();
+                        stat.incrAuthReject();
                         return;
                     }
-                    authAccept.getAndIncrement();
+                    stat.incrAuthAccept();
                 } catch (Exception e) {
-                    authDrop.getAndIncrement();
+                    stat.incrAuthDrop();
                     return;
                 }
 
                 try {
                     long start = System.currentTimeMillis();
                     session = sendAcct(session,AccountingRequest.ACCT_STATUS_TYPE_START);
-                    acctStart.getAndIncrement();
-                    acctResp.getAndIncrement();
+                    stat.incrAcctStart();
+                    stat.incrAcctResp();
                 } catch (Exception e) {
-                    acctDrop.getAndIncrement();
+                    stat.incrAcctDrop();
                     return;
                 }
 
                 try {
-                    Thread.sleep(random.nextInt(5000));
+                    Thread.sleep(uptime*1000);
                 } catch (InterruptedException ignore) {
                 }
 
                 try {
                     session = sendAcct(session,AccountingRequest.ACCT_STATUS_TYPE_INTERIM_UPDATE);
-                    acctUpdate.getAndIncrement();
-                    acctResp.getAndIncrement();
+                    stat.incrAcctUpdate();
+                    stat.incrAcctResp();
                 } catch (Exception e) {
-                    acctDrop.getAndIncrement();
+                    stat.incrAcctDrop();
                 }
 
                 try {
-                    Thread.sleep(random.nextInt(5000));
+                    Thread.sleep(random.nextInt(ttl*1000));
                 } catch (InterruptedException ignore) {
                 }
 
                 try {
                     session = sendAcct(session,AccountingRequest.ACCT_STATUS_TYPE_STOP);
-                    acctStop.getAndIncrement();
-                    acctResp.getAndIncrement();
+                    stat.incrAcctStop();
+                    stat.incrAcctResp();
                 } catch (Exception e) {
-                    acctDrop.getAndIncrement();
+                    stat.incrAcctDrop();
                 }
             });
             result.add(ft);
@@ -234,16 +247,17 @@ public class SimulationCommand {
             StringBuffer buff = new StringBuffer();
             buff.append("\r\n####################################################\r\n");
             buff.append(String.format("#  Bras Simulation: Total = %s, Concurrent = %s ", total,pool)).append("\r\n");
-            buff.append("#  AccessRequest: ").append(authReq.intValue()).append("\r\n");
-            buff.append("#  AccessAccept: ").append(authAccept.intValue()).append("\r\n");
-            buff.append("#  AccessReject: ").append(authRejectt.intValue()).append("\r\n");
-            buff.append("#  AccessDrop: ").append(authDrop.intValue()).append("\r\n");
-            buff.append("#  AccountingRequest <Start>: ").append(acctStart.intValue()).append("\r\n");
-            buff.append("#  AccountingRequest <Update>: ").append(acctUpdate.intValue()).append("\r\n");
-            buff.append("#  AccountingRequest <Stop>: ").append(acctStop.intValue()).append("\r\n");
-            buff.append("#  AccountingRequest: ").append(acctStart.intValue()+acctUpdate.intValue()+acctStop.intValue()).append("\r\n");
-            buff.append("#  AccountingResponse: ").append(acctResp.intValue()).append("\r\n");
-            buff.append("#  AccountingDrop: ").append(acctDrop.intValue()).append("\r\n");
+            buff.append("#  AccessRequest: ").append(stat.getAuthReq()).append("\r\n");
+            buff.append("#  AccessAccept: ").append(stat.getAuthAccept()).append("\r\n");
+            buff.append("#  AccessReject: ").append(stat.getAuthReject()).append("\r\n");
+            buff.append("#  AccessDrop: ").append(stat.getAuthDrop()).append("\r\n");
+            buff.append("#  AccountingRequest <Start>: ").append(stat.getAcctStart()).append("\r\n");
+            buff.append("#  AccountingRequest <Update>: ").append(stat.getAcctUpdate()).append("\r\n");
+            buff.append("#  AccountingRequest <Stop>: ").append(stat.getAcctStop()).append("\r\n");
+            buff.append("#  AccountingRequest: ").append(stat.getAcctStart()+stat.getAcctUpdate()+stat.getAcctStop()).append("\r\n");
+            buff.append("#  AccountingResponse: ").append(stat.getAcctResp()).append("\r\n");
+            buff.append("#  AccountingDrop: ").append(stat.getAcctDrop()).append("\r\n");
+            buff.append("#  Maximum QPS: ").append(stat.getLastMaxResp()).append("\r\n");
             buff.append("#####################################################\r\n");
             System.out.println(buff.toString());
             if(done == result.size()){

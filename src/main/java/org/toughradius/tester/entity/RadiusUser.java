@@ -1,9 +1,10 @@
 package org.toughradius.tester.entity;
 
-public class RadiusUser {
+public class RadiusUser implements  Comparable{
 
     private String username;
     private String password;
+    private int hits;
 
     public RadiusUser() {
     }
@@ -27,5 +28,19 @@ public class RadiusUser {
 
     public void setPassword(String password) {
         this.password = password;
+    }
+
+    public int getHits() {
+        return hits;
+    }
+
+    public void setHits(int hits) {
+        this.hits = hits;
+    }
+
+    @Override
+    public int compareTo(Object o) {
+        RadiusUser u = (RadiusUser)o;
+        return this.getHits() - u.getHits();
     }
 }

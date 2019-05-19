@@ -17,7 +17,7 @@ public class RadiusConfig {
     private int timeout = 5000;
     private int retry = 3;
     private String authProtocol = AUTH_PAP;
-    private String userfile = "/etc/jradiustester-user.txt";
+    private String userfile = "jrusers.txt";
     private String secret = "secret";
     private String nasid = "jradiustester";
     private String nasip = "127.0.0.1";

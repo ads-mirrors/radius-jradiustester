@@ -15,3 +15,7 @@ logs
 application-wjt.properties
 *.pyc
 *.log
+jrusers.txt
+*.tmp
+*.exe
+*.exe4j
