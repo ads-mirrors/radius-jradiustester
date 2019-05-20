@@ -55,9 +55,10 @@ public class ConfigCommand {
 
     @ShellMethod("gen test users")
     public String genUsers(String prefix,String passwd,int num) {
-        StringBuffer buff = new StringBuffer();
+        int width = String.valueOf(num).length();
+        StringBuilder buff = new StringBuilder();
         for(int i = 0;i<num;i++){
-            buff.append(prefix).append(String.format("%04d",i)).append(",").append(passwd).append("\r\n");
+            buff.append(prefix).append(String.format("%0"+width+"d",i+1)).append(",").append(passwd).append("\r\n");
         }
         FileUtil.writeFile(radiusConfig.getUserfile(),buff.toString());
         return "done";

@@ -264,6 +264,7 @@ public class SimulationCommand {
                 break;
             }
         }
+        sched.shutdown();
         return "";
     }
 }
